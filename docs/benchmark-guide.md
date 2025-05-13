@@ -1,4 +1,4 @@
-# Benchmark Implementation
+# Benchmark Guide
 
 > This file is deprecated. Our documentation has been consolidated and streamlined for a better developer experience.
 
