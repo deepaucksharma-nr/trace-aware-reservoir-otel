@@ -1,228 +1,232 @@
-# Trace-Aware Reservoir Sampling for OpenTelemetry
+# New Relic DOT Demo Lab
 
-A trace-aware reservoir sampling implementation for OpenTelemetry Collector that intelligently samples traces based on their importance, maintaining a representative sample even under high load.
-
-## Project Structure
-
-The project is organized into these main components:
-
-```
-trace-aware-reservoir-otel/
-│
-├── core/                      # Core library code
-│   └── reservoir/             # Reservoir sampling implementation
-│
-├── apps/                      # Applications
-│   ├── collector/             # OpenTelemetry collector with reservoir sampling
-│   └── tools/                 # Supporting tools
-│
-├── bench/                     # Benchmarking framework
-│   ├── profiles/              # Benchmark configuration profiles
-│   ├── kpis/                  # Key Performance Indicators
-│   └── runner/                # Benchmark orchestration
-│
-├── infra/                     # Infrastructure code
-│   ├── helm/                  # Helm charts
-│   └── kind/                  # Kind cluster configurations
-│
-├── build/                     # Build configurations
-│   ├── docker/                # Dockerfiles
-│   └── scripts/               # Build scripts
-│
-├── scripts/                   # Operational scripts
-│
-└── docs/                      # Documentation
-```
+A one-command demo environment for New Relic DOT (Distribution of Telemetry) with multiple collection profiles, showcasing Google's Online Boutique and Weaveworks' Sock Shop microservices.
 
 ## Overview
 
-This repository implements a statistically-sound reservoir sampling processor for the OpenTelemetry Collector that:
+This project provides a simple way to spin up a complete observability demo environment:
 
-- Maintains an unbiased, representative sample even with unbounded data streams
-- Preserves complete traces when operating in trace-aware mode
-- Persists the reservoir state using Badger database for durability across restarts
-- Integrates seamlessly with the New Relic OpenTelemetry Distribution (NR-DOT)
+- **Demo Applications**:
+  - Google's Online Boutique microservices demo (with built-in load generator)
+  - Weaveworks' Sock Shop microservices demo (with built-in load generator)
+
+- **New Relic DOT Collector** with five different collection profiles:
+  - **Ultra**: Full fidelity metrics (5s interval)
+  - **Balanced**: PID-aware metrics with reduced metrics (30s interval, ~8× reduction)
+  - **Optimized**: Executable-aggregated metrics (60s interval, ~40-60× reduction)
+  - **Lean**: SLO-focused metrics (120s interval, ~90× reduction)
+  - **Micro**: Minimal SLO metrics (300s interval, ~250×+ reduction)
+
+- **Deployment Options**:
+  - Docker Compose (local development)
+  - Kubernetes via kind (cloud-like deployment)
+  - GitHub Actions (continuous monitoring)
+
+## Profile Comparison
+
+| Profile    | Collection Interval | Target Series/Host | Collector RAM | Points/Min | Key Features                                  |
+|------------|---------------------|-------------------|--------------|------------|---------------------------------------------|
+| Ultra      | 5s                  | 400-600           | 130-160 MB   | ~9,000     | Full fidelity metrics                       |
+| Balanced   | 30s                 | ≤80               | 90-110 MB    | ~1,000     | Per-PID visibility                          |
+| Optimized  | 60s                 | 30-40             | 70-80 MB     | ~500       | Executable aggregation (~40-60× reduction)  |
+| Lean       | 120s                | 20-25             | 60-70 MB     | ~200       | SLO focus, higher thresholds (~90× reduction)|
+| Micro      | 300s                | 15-20             | 55-65 MB     | ≤100       | Minimal SLO metrics (~250× reduction)       |
+
+## Requirements
+
+### Docker Mode
+- Docker and Docker Compose
+- New Relic License Key
+
+### Kubernetes Mode
+- Kind (Kubernetes in Docker)
+- Helm
+- kubectl
+- New Relic License Key
+
+### GitHub Actions Mode
+- GitHub repository
+- GitHub Actions enabled
+- New Relic License Key added as a repository secret named `NR_LICENSE_KEY`
 
 ## Quick Start
 
-### 1. Setup Development Environment
+```bash
+# Clone the repository
+git clone https://github.com/your-org/nrdot-demo-lab
+cd nrdot-demo-lab
+
+# Set your New Relic license key
+export NR_KEY=your_new_relic_license_key
+# Or create a .env file with NR_KEY=your_key
+
+# Validate configuration before running
+make validate
+
+# Start the environment (defaults to docker mode and balanced profile)
+make up
+
+# Follow collector logs
+make logs
+
+# Display NRQL for profile comparison
+make query
+
+# Get link to filtered dashboard
+make dashboard
+
+# When finished
+make down
+```
+
+## Configuration Options
+
+### Data Collection Profiles
 
 ```bash
-# Install dependencies and setup development environment
-make setup
+# Ultra profile (maximum data, 5s interval)
+make down
+PROFILE=ultra make up
+
+# Balanced profile (recommended, 30s interval, ~8x reduction)
+make down
+PROFILE=balanced make up
+
+# Optimized profile (60s interval, ~40-60x reduction)
+make down
+PROFILE=optimized make up
+
+# Lean profile (120s interval, ~90x reduction)
+make down
+PROFILE=lean make up
+
+# Micro profile (300s interval, ~250x+ reduction)
+make down
+PROFILE=micro make up
 ```
 
-### 2. Build and Test
+### Deployment Modes
 
 ```bash
-# Run all tests
-make test
+# Docker mode (default)
+MODE=docker make up
 
-# Build the application
-make build
+# Kubernetes (kind) mode
+MODE=kind make up
 ```
 
-### 3. Build Docker Images
+## Quick NRQL to Compare Profiles
 
-```bash
-# Build main Docker image
-make image
-
-# Build all images (main, benchmark)
-make images
+```sql
+SELECT
+  bytecountestimate()/1e6 AS "MB/5m",
+  uniques(metricName)     AS "Series"
+FROM   Metric
+WHERE  metricName LIKE 'process.%'
+FACET  benchmark.profile
+SINCE 5 minutes AGO
 ```
 
-### 4. Deploy to Kubernetes
+## Accessing Demo Applications
 
-```bash
-# Create Kind cluster and load images
-make kind
-make kind-load
+- **Online Boutique**: http://localhost:8080
+- **Sock Shop**: http://localhost:8079
 
-# Deploy to Kubernetes
-export NEW_RELIC_KEY="your_license_key_here"
-make deploy
+## GitHub Actions Integration
+
+Three approaches are provided based on your needs and GitHub plan:
+
+### Approach 1: Free & Fully-Hosted (Cron-style re-launches)
+
+Best for most users who want continuous monitoring within free tier limits.
+
+- Add your New Relic license key as a repository secret named `NR_LICENSE_KEY`
+- The workflow in `.github/workflows/scheduled-lab.yml` will run every 30 minutes
+- Adjust the cron schedule as needed
+- Manually trigger with different parameters via "Run workflow" button
+
+### Approach 2: Budget / Pro-plan (Matrix fan-out + nightly soak)
+
+For teams with paid GitHub plans who want to regularly compare multiple profiles.
+
+- The workflow in `.github/workflows/matrix-lab.yml` runs all profiles simultaneously
+- Scheduled to run daily at 03:00 UTC
+- Good for regression testing and performance comparisons
+
+### Approach 3: Truly Continuous (Self-hosted runner)
+
+For 24/7 monitoring without limitations on a self-hosted runner.
+
+1. Provision a small VM (2 vCPU + 2 GB RAM)
+2. Install a self-hosted runner with tags: `self-hosted,linux,nrdot-lab`
+3. Use the workflow in `.github/workflows/continuous-lab.yml` to run indefinitely
+
+## Monitoring Your Monitoring
+
+Add this New Relic alert to ensure your monitoring system is operating properly:
+
+```sql
+SELECT rate(sum(otelcol_exporter_sent_metric_points)) 
+FROM Metric 
+WHERE benchmark.profile IS NOT NULL 
+FACET benchmark.profile
 ```
 
-### 5. Run Benchmarks
+## VM Deployment Notes
 
-```bash
-# Run full benchmarks
-make bench PROFILES=max-throughput-traces,tiny-footprint-edge DURATION=10m
+For non-container deployments on VMs:
 
-# Run quick benchmark test
-make bench-quick
+1. Create a systemd drop-in for the collector:
+   ```
+   mkdir -p /etc/systemd/system/nrdot-collector-host.service.d/
+   cat > /etc/systemd/system/nrdot-collector-host.service.d/local.conf << EOL
+   [Service]
+   Environment="HOST_ROOT_PATH=/hostfs"
+   Environment="BENCHMARK_PROFILE=lean"
+   Environment="NR_USE_LEAN=true" 
+   Environment="MEM_LIMIT_MIB=256"
+   Environment="NEW_RELIC_LICENSE_KEY=your-license-key"
+   EOL
+   ```
 
-# Alternatively, use the flexible benchmark runner script
-./scripts/run-benchmark.sh --mode kind --profiles max-throughput-traces --duration 5m
+2. Mount hostfs if needed:
+   ```
+   mkdir -p /hostfs
+   mount --rbind / /hostfs
+   ```
+
+3. Restart the collector:
+   ```
+   systemctl daemon-reload
+   systemctl restart nrdot-collector-host
+   ```
+
+## Repository Structure
+
+```
+.
+├── Makefile                      # Main orchestration with multiple profiles
+├── docker-compose.yml            # Docker deployment of services
+├── config.yaml                   # New Relic DOT collector with 5 profiles
+├── .env.example                  # Example environment variables
+├── .github/                      # GitHub Actions integration
+│   ├── actions/start-lab/        # Reusable composite action
+│   │   └── action.yml
+│   └── workflows/
+│       ├── scheduled-lab.yml     # Approach 1: Cron-style relaunches
+│       ├── matrix-lab.yml        # Approach 2: Matrix fan-out
+│       └── continuous-lab.yml    # Approach 3: Self-hosted continuous
+└── k8s/                          # Kubernetes configuration files
+    ├── namespace.yaml            # Observability namespace
+    ├── boutique-helm-values.yaml # Helm values for Online Boutique
+    ├── sockshop-helm-values.yaml # Helm values for Sock Shop
+    └── collector-daemonset.yaml  # New Relic DOT collector DaemonSet
 ```
 
-## Implementation Details
+## Security Note
 
-The processor uses Algorithm R for reservoir sampling with these key characteristics:
-
-- **Windowed Sampling**: Maintain separate reservoirs for configurable time windows
-- **Trace Awareness**: Buffer and handle spans with the same trace ID together
-- **Persistence**: Store reservoir state in Badger DB with configurable checkpointing
-- **Metrics**: Expose performance and behavior metrics via Prometheus
-
-### Architecture
-
-```
-┌─────────────┐     ┌───────────────────┐     ┌─────────────┐
-│ OTLP Input  │────▶│ Reservoir Sampler │────▶│ OTLP Output │
-└─────────────┘     └───────────────────┘     └─────────────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │ Badger DB     │
-                    │ Persistence   │
-                    └───────────────┘
-```
-
-## Configuration
-
-Sample configuration in your collector config.yaml:
-
-```yaml
-processors:
-  reservoir_sampler:
-    size_k: 5000                         # Reservoir size (in thousands of traces)
-    window_duration: 60s                 # Time window for each reservoir
-    checkpoint_path: /var/otelpersist/badger  # Persistence location
-    checkpoint_interval: 10s             # How often to save state
-    trace_aware: true                    # Buffer spans from the same trace
-    trace_buffer_timeout: 30s            # How long to wait for spans from same trace
-    trace_buffer_max_size: 100000        # Maximum buffer size
-    db_compaction_schedule_cron: "0 2 * * *"  # When to compact the database
-    db_compaction_target_size: 134217728 # Target size for compaction (128 MiB)
-```
-
-## Benchmark Profiles
-
-The project includes a benchmarking system with different performance profiles:
-
-- **max-throughput-traces**: Optimized for maximum trace throughput
-- **tiny-footprint-edge**: Optimized for minimal resource usage in edge environments
-
-These profiles can be benchmarked simultaneously against identical traffic using our fan-out topology, allowing for direct comparison of different configurations.
-
-## Streamlined Development Workflow
-
-Our enhanced workflow simplifies the development experience:
-
-### Unified Makefile Commands
-
-```bash
-# View all available commands with descriptions
-make help
-
-# Development tasks
-make deps            # Install dependencies
-make lint            # Run linters
-make test            # Run all tests
-make build           # Build the application
-
-# Docker image building
-make image           # Build main image
-make image-bench     # Build benchmark image
-make images          # Build all images
-
-# Kubernetes deployment
-make kind            # Create Kind cluster
-make kind-load       # Load images into cluster
-make deploy          # Deploy to Kubernetes
-make quickrun        # Quick build and load
-
-# Operations
-make status          # Check deployment status
-make logs            # Stream collector logs
-make metrics         # Check metrics
-make clean           # Clean up resources
-
-# Benchmarking
-make bench           # Run benchmarks
-make bench-quick     # Run a quick benchmark
-make bench-clean     # Clean up benchmark resources
-```
-
-### Flexible Benchmark Runner
-
-For more control over benchmarks, use the benchmark runner script:
-
-```bash
-# Run in Kind cluster with multiple profiles
-./scripts/run-benchmark.sh --mode kind --profiles max-throughput-traces,tiny-footprint-edge --duration 5m
-
-# Run in local simulator mode
-./scripts/run-benchmark.sh --mode local --port 9090
-
-# Run with existing Kubernetes cluster
-./scripts/run-benchmark.sh --mode existing --kubeconfig ~/.kube/my-cluster.yaml
-```
-
-## Prerequisites
-
-- Docker
-- Kubernetes cluster (e.g., Docker Desktop with Kubernetes enabled or KinD)
-- Helm (for Kubernetes deployment)
-- New Relic license key (optional, for sending data to New Relic)
-- Go 1.21+
-
-## Documentation
-
-- [Streamlined Workflow](docs/streamlined-workflow.md) - Comprehensive guide to our improved development workflow
-- [Implementation Guide](docs/implementation-guide.md) - Step-by-step guide for building and deploying
-- [Core Library](core/reservoir/README.md) - Documentation for the core reservoir sampling library
-- [Benchmark Implementation](docs/benchmark-implementation.md) - End-to-end benchmark guide with fan-out topology
-- [Contributing Guide](CONTRIBUTING.md) - Guidelines for contributing to the project
-
-## Windows Development 
-
-For Windows 10/11 users, we recommend using WSL 2 (Windows Subsystem for Linux) with Ubuntu 22.04 to maintain full compatibility with the Linux-based tooling in this project.
-
-See our [Windows Development Guide](docs/windows-guide.md) for detailed setup instructions.
+This lab runs the collector as `root` with `pid: host` and mounts the host filesystem, which grants full host access. This is standard for monitoring but should be limited to trusted environments.
 
 ## License
 
-[Insert License Information]
+This project is licensed under the Apache 2.0 License.

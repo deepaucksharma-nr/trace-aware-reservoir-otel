@@ -1,44 +1,43 @@
-# Binaries for programs and plugins
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+**/.DS_Store
+
+# Build artifacts
+bin/
+/dist/
+/build/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-bin/
-dist/
+*.o
+*.a
 
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Dependency directories
+# Dependencies
 vendor/
+node_modules/
 
-# IDE specific files
-.idea/
-.vscode/
-*.swp
-*.swo
+# Logs
+*.log
 
-# OS specific files
-.DS_Store
-Thumbs.db
+# Testing and coverage
+*.out
+coverage.txt
+.coverage
+htmlcov/
 
-# Local environment variables
+# Environment and config files
 .env
-.envrc
-
-# Kubernetes generated manifests
-*.generated.yaml
-
-# Helm chart dependencies
-charts/*/charts/
-charts/*/Chart.lock
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+**/.claude/settings.local.json
 
 # Temporary files
 tmp/
 temp/
-
-**/.claude/settings.local.json
