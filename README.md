@@ -1,177 +1,181 @@
 # Trace-Aware Reservoir Sampling for OpenTelemetry
 
-[![CI](https://github.com/deepaucksharma-nr/trace-aware-reservoir-otel/actions/workflows/ci.yml/badge.svg)](https://github.com/deepaucksharma-nr/trace-aware-reservoir-otel/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/deepaucksharma-nr/trace-aware-reservoir-otel)](https://goreportcard.com/report/github.com/deepaucksharma-nr/trace-aware-reservoir-otel)
+A trace-aware reservoir sampling implementation for OpenTelemetry Collector that intelligently samples traces based on their importance, maintaining a representative sample even under high load.
 
-This project implements a specialized trace-aware reservoir sampling processor for the OpenTelemetry Collector. It provides statistically sound sampling while preserving complete traces.
+## Project Structure
 
-## Features
+The project is organized into these main components:
 
-- **Reservoir Sampling**: Implements Algorithm R for statistically representative sampling of spans
-- **Trace-Aware Mode**: Ensures complete traces are preserved during sampling
-- **Persistent Storage**: Checkpoints reservoir state to disk for durability across restarts
-- **Database Compaction**: Scheduled compaction of the checkpoint database to control size
-- **Configurable**: Flexible configuration for window sizes, sampling rates, and more
+```
+trace-aware-reservoir-otel/
+│
+├── core/                      # Core library code
+│   └── reservoir/             # Reservoir sampling implementation
+│
+├── apps/                      # Applications
+│   ├── collector/             # OpenTelemetry collector with reservoir sampling
+│   └── tools/                 # Supporting tools
+│       └── kpi-evaluator/     # KPI evaluation tool
+│
+├── bench/                     # Benchmarking framework
+│   ├── profiles/              # Benchmark configuration profiles
+│   ├── kpis/                  # Key Performance Indicators
+│   └── runner/                # Benchmark orchestration
+│
+├── infra/                     # Infrastructure code
+│   ├── helm/                  # Helm charts
+│   └── kind/                  # Kind cluster configurations
+│
+├── build/                     # Build configurations
+│   ├── docker/                # Dockerfiles
+│   └── scripts/               # Build scripts
+│
+└── docs/                      # Documentation
+```
 
-## How It Works
+## Overview
 
-### Reservoir Sampling
+This repository implements a statistically-sound reservoir sampling processor for the OpenTelemetry Collector that:
 
-Reservoir sampling is a family of randomized algorithms for randomly selecting k samples from a list of n items, where n is either a very large or unknown number. The algorithm ensures that each item has an equal probability of being selected, regardless of its position in the stream.
+- Maintains an unbiased, representative sample even with unbounded data streams
+- Preserves complete traces when operating in trace-aware mode
+- Persists the reservoir state using Badger database for durability across restarts
+- Integrates seamlessly with the New Relic OpenTelemetry Distribution (NR-DOT)
 
-Key characteristics:
-- Statistically representative sampling
-- Constant memory usage (proportional to k, not n)
-- Streaming-friendly (processes items one at a time)
+## Quick Start
 
-### Trace-Aware Mode
+### 1. Build the Docker Image
 
-In trace-aware mode, the processor:
-1. Buffers all spans for a trace until the trace is considered complete
-2. Applies reservoir sampling to complete traces, treating each trace as a unit
-3. Either keeps or drops entire traces, preserving the parent-child relationships
+```bash
+make image
+```
+
+### 2. Deploy to Kubernetes
+
+```bash
+export NEW_RELIC_KEY="your_license_key_here"
+make deploy
+```
+
+### 3. Verify the Deployment
+
+```bash
+make status
+make metrics
+```
+
+### 4. Run Benchmarks
+
+```bash
+# From repo root:
+export IMAGE_TAG=bench
+make image VERSION=$IMAGE_TAG
+make bench IMAGE=ghcr.io/<your-org>/nrdot-reservoir:$IMAGE_TAG DURATION=10m
+```
+
+## Implementation Details
+
+The processor uses Algorithm R for reservoir sampling with these key characteristics:
+
+- **Windowed Sampling**: Maintain separate reservoirs for configurable time windows
+- **Trace Awareness**: Buffer and handle spans with the same trace ID together
+- **Persistence**: Store reservoir state in Badger DB with configurable checkpointing
+- **Metrics**: Expose performance and behavior metrics via Prometheus
+
+### Architecture
+
+```
+┌─────────────┐     ┌───────────────────┐     ┌─────────────┐
+│ OTLP Input  │────▶│ Reservoir Sampler │────▶│ OTLP Output │
+└─────────────┘     └───────────────────┘     └─────────────┘
+                             │
+                             ▼
+                     ┌───────────────┐
+                     │ Badger DB     │
+                     │ Persistence   │
+                     └───────────────┘
+```
 
 ## Configuration
+
+Sample configuration in your collector config.yaml:
 
 ```yaml
 processors:
   reservoir_sampler:
-    # Maximum reservoir size (number of spans to keep)
-    size_k: 5000
-    
-    # Duration of each sampling window
-    window_duration: 60s
-    
-    # Path to the checkpoint file for persistence
-    checkpoint_path: /var/lib/otelcol/reservoir_checkpoint.db
-    
-    # How often to write checkpoints
-    checkpoint_interval: 10s
-    
-    # Enable trace-aware sampling
-    trace_aware: true
-    
-    # Maximum traces to buffer at once (for trace-aware mode)
-    trace_buffer_max_size: 100000
-    
-    # How long to wait for a trace to complete
-    trace_buffer_timeout: 10s
-    
-    # Optional: Cron schedule for database compaction
-    db_compaction_schedule_cron: "0 0 * * *"  # Daily at midnight
-    
-    # Optional: Target size for database after compaction (bytes)
-    db_compaction_target_size: 104857600  # 100MB
+    size_k: 5000                         # Reservoir size (in thousands of traces)
+    window_duration: 60s                 # Time window for each reservoir
+    checkpoint_path: /var/otelpersist/badger  # Persistence location
+    checkpoint_interval: 10s             # How often to save state
+    trace_aware: true                    # Buffer spans from the same trace
+    trace_buffer_timeout: 30s            # How long to wait for spans from same trace
+    trace_buffer_max_size: 100000        # Maximum buffer size
+    db_compaction_schedule_cron: "0 2 * * *"  # When to compact the database
+    db_compaction_target_size: 134217728 # Target size for compaction (128 MiB)
 ```
 
-## Building and Running
+## Benchmark Profiles
+
+The project includes a benchmarking system with different performance profiles:
+
+- **max-throughput-traces**: Optimized for maximum trace throughput
+- **tiny-footprint-edge**: Optimized for minimal resource usage in edge environments
+
+These profiles can be benchmarked simultaneously against identical traffic using our fan-out topology, allowing for direct comparison of different configurations.
+
+## Development
 
 ### Prerequisites
 
-- Go 1.21 or later
-- OpenTelemetry Collector 0.91.0 or later
+- Docker
+- Kubernetes cluster (e.g., Docker Desktop with Kubernetes enabled or KinD)
+- Helm (for Kubernetes deployment)
+- New Relic license key (optional)
+- Go 1.21+
 
-### Build
+### Building and Testing
+
+We've streamlined the development workflow using Make. Here are some common commands:
 
 ```bash
-make build
-```
-
-### Run
-
-```bash
-./bin/pte-collector --config=config.yaml
-
-# Or use the Makefile to run:
-make run
-```
-
-## Usage Example
-
-```yaml
-# Example pipeline configuration
-service:
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [memory_limiter, batch, reservoir_sampler]
-      exporters: [debug, otlphttp]
-
-  # Optional telemetry settings
-  telemetry:
-    metrics:
-      level: detailed
-```
-
-## Integration with New Relic
-
-The example configuration includes an OTLP exporter configured for New Relic. To use it:
-
-1. Set your New Relic license key as an environment variable:
-   ```bash
-   export NEW_RELIC_LICENSE_KEY=your-license-key-here
-   ```
-
-2. The exporter is configured to send data to New Relic's OTLP endpoint:
-   ```yaml
-   otlphttp:
-     endpoint: "https://otlp.nr-data.net:4318"
-     headers:
-       api-key: ${NEW_RELIC_LICENSE_KEY}
-   ```
-
-## Extending the Collector
-
-This processor can be integrated into custom OpenTelemetry Collector distributions. To include it in your distribution:
-
-1. Add this repository as a dependency:
-   ```bash
-   go get github.com/deepaksharma/trace-aware-reservoir-otel
-   ```
-
-2. Import the processor in your collector's main.go:
-   ```go
-   import (
-     // Other imports
-     "github.com/deepaksharma/trace-aware-reservoir-otel/internal/processor/reservoirsampler"
-   )
-
-   func main() {
-     factories, err := components.Components()
-     if err != nil {
-       // Handle error
-     }
-
-     // Add the reservoir sampler factory
-     factories.Processors[reservoirsampler.Type] = reservoirsampler.NewFactory()
-
-     // Continue with collector setup
-   }
-   ```
-
-## Testing
-
-Run the unit tests:
-```bash
+# Run unit tests
 make test
+
+# Run only core library tests
+make test-core
+
+# Build the binary
+make build
+
+# Build the Docker image
+make image
+
+# Deploy to Kubernetes
+make deploy
+
+# Run the complete development cycle
+make dev
+
+# View logs
+make logs
+
+# Run benchmarks
+make bench IMAGE=ghcr.io/<your-org>/nrdot-reservoir:latest
 ```
 
-Run end-to-end tests:
-```bash
-cd e2e
-go test ./tests -v
-```
+### Windows Development 
 
-## Contributing
+For Windows 10/11 users, we recommend using WSL 2 (Windows Subsystem for Linux) with Ubuntu 22.04 to maintain full compatibility with the Linux-based tooling in this project.
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+See our [Windows Development Guide](docs/windows-guide.md) for detailed setup instructions.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## Documentation
+
+- [Implementation Guide](docs/implementation-guide.md) - Step-by-step guide for building and deploying
+- [Core Library](core/reservoir/README.md) - Documentation for the core reservoir sampling library
+- [Benchmark Implementation](docs/benchmark-implementation.md) - End-to-end benchmark guide with fan-out topology
+- [Contributing Guide](CONTRIBUTING.md) - Guidelines for contributing to the project
 
 ## License
 
-Apache 2.0 License
+[Insert License Information]

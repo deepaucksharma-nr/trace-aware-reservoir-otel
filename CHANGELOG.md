@@ -5,53 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2025-05-12
+## [Unreleased]
 
 ### Added
-- New custom binary serialization format for span data
-- Added `serialization.go` with direct binary serialization functions
-- Added comprehensive test coverage for the new serialization approach
-- Added batched processing for checkpoint operations
-- Added database compaction function with proper error handling
-- Added memory usage metrics during checkpointing
-- Added integration test for reservoir lifecycle with checkpointing
-- Added performance benchmarks for memory usage
+- Major project refactoring for improved modularity and maintainability
+- Separated core reservoir sampling logic into a standalone Go module
+- Created clean interfaces for all key components
+- Implemented Go-based benchmark orchestrator
+- Consolidated Helm charts into a single otel-bundle chart with multiple modes
+- Added profile-based configurations for benchmarking
+- Enhanced documentation with updated implementation guides
+- Added CONTRIBUTING.md guide for new contributors
 
 ### Changed
-- Replaced Protocol Buffer serialization with custom binary format
-- Optimized checkpoint operation to use batched processing
-- Reduced memory footprint by storing only essential span attributes
-- Updated Makefile to reference the new performance tests
-- Enhanced error handling throughout the codebase
-- Improved database compaction logic with better transaction management
+- Reorganized project structure into core, apps, bench, infra, and build directories
+- Updated Dockerfiles to work with the new structure
+- Modified Makefile targets to support the new architecture
+- Improved benchmarking workflow with KPI evaluation
+- Updated all documentation files to reflect the new structure
 
 ### Fixed
-- Fixed stack overflow during serialization of large reservoirs
-- Fixed memory pressure issues during checkpointing operations
-- Fixed syntax errors in processor.go
-- Fixed duplicate imports in various files
-- Fixed incorrect type references
-- Fixed e2e test configuration
+- Resolved issues with persistence implementation
+- Improved trace ID handling for better uniqueness
+- Enhanced error handling throughout the codebase
 
-### Performance
-- Dramatically reduced memory usage during serialization
-- Improved checkpoint speed by using batched operations
-- Reduced disk usage by optimizing the serialized format
-- Added performance benchmarks for various trace volumes
-
-## [0.1.0] - 2025-05-10
+## [0.1.0] - 2024-04-15
 
 ### Added
 - Initial implementation of trace-aware reservoir sampling processor
-- Reservoir sampling algorithm (Algorithm R) implementation
-- Trace-aware buffering and sampling
-- Persistence layer for checkpointing reservoir state
-- Configurable window durations and reservoir sizes
-- End-to-end test framework
-- Integration with New Relic OTLP endpoint
+- Algorithm R implementation for statistically sound sampling
+- Time-windowed sampling for regular export cycles
+- Trace-aware buffering to keep spans from the same trace together
+- Badger DB persistence for durability across restarts
+- Metrics for monitoring reservoir behavior
+- Helm chart for Kubernetes deployment
+- Basic benchmarking framework
 
 ### Changed
-- N/A (initial release)
+- Updated integration with New Relic OpenTelemetry Distribution
+- Improved configuration options for processor
 
 ### Fixed
-- N/A (initial release)
+- Resolved issues with trace ID handling
+- Fixed memory leaks in trace buffer
+- Corrected window rollover behavior
+
+[Unreleased]: https://github.com/deepaucksharma/trace-aware-reservoir-otel/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/deepaucksharma/trace-aware-reservoir-otel/releases/tag/v0.1.0

@@ -1,98 +1,95 @@
-.PHONY: all build test lint clean protobuf generate bench coverage ci
+# Makefile for trace-aware-reservoir-otel
 
-# Project variables
-BINARY_NAME=pte-collector
-BUILD_DIR=bin
-GO_PKG=github.com/deepaksharma/trace-aware-reservoir-otel
-VERSION=0.2.0
-LDFLAGS=-ldflags "-X main.Version=$(VERSION)"
+# Configuration variables
+REGISTRY ?= ghcr.io
+ORG ?= deepaucksharma
+IMAGE_NAME ?= nrdot-reservoir
+VERSION ?= v0.1.0
+IMAGE = $(REGISTRY)/$(ORG)/$(IMAGE_NAME):$(VERSION)
+LICENSE_KEY ?= $(NEW_RELIC_KEY)
+NAMESPACE ?= otel
 
-# Go commands
-GO=go
-GOBUILD=$(GO) build
-GOTEST=$(GO) test
-GOFMT=$(GO) fmt
-GOLINT=golangci-lint
-PROTOC=protoc
+# Help command - lists all available targets with descriptions
+.PHONY: help
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-# Protobuf variables
-PROTO_DIR=internal/processor/reservoirsampler/spanprotos
-PROTO_FILES=$(wildcard $(PROTO_DIR)/*.proto)
+# Development tasks
+.PHONY: test
+test: ## Run all unit tests
+	go test ./core/... ./apps/... ./bench/runner/... -v -cover
 
-all: protobuf generate build test
+.PHONY: test-core
+test-core: ## Run core library tests only
+	go test ./core/... -v -cover
 
-build:
-	@echo "Building $(BINARY_NAME)..."
-	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/pte
+.PHONY: build
+build: ## Build the collector application
+	go build -o bin/otelcol-reservoir ./apps/collector
 
-test:
-	@echo "Running tests..."
-	$(GOTEST) -race -cover -timeout=5m ./...
+.PHONY: image
+image: ## Build Docker image
+	docker build -t $(IMAGE) \
+	  --build-arg NRDOT_VERSION=v0.91.0 \
+	  --build-arg RS_VERSION=$(VERSION) \
+	  -f build/docker/Dockerfile.multistage .
 
-lint:
-	@echo "Running linter..."
-	$(GOFMT) ./...
-	$(GOLINT) run ./...
+# Kubernetes deployment
+.PHONY: kind
+kind: ## Create kind cluster if not exists
+	kind create cluster --config infra/kind/kind-config.yaml || true
+	kind load docker-image $(IMAGE)
 
-bench:
-	@echo "Running benchmarks..."
-	$(GOTEST) -bench=. -benchtime=2s -timeout=5m github.com/deepaksharma/trace-aware-reservoir-otel/internal/processor/reservoirsampler/...
-	@if [ -d "./performance" ]; then \
-		echo "Running performance tests..."; \
-		$(GOTEST) -timeout=5m ./performance/...; \
-	fi
+.PHONY: deploy
+deploy: ## Deploy to Kubernetes
+	kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+	helm upgrade --install otel-reservoir ./infra/helm/otel-bundle \
+	  -n $(NAMESPACE) \
+	  --set mode=collector \
+	  --set global.licenseKey="$(LICENSE_KEY)" \
+	  --set image.repository="$(REGISTRY)/$(ORG)/$(IMAGE_NAME)" \
+	  --set image.tag="$(VERSION)"
 
-coverage:
-	@echo "Generating coverage report..."
-	$(GOTEST) -coverprofile=coverage.out -covermode=atomic -timeout=5m github.com/deepaksharma/trace-aware-reservoir-otel/internal/processor/reservoirsampler/...
-	$(GO) tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated at coverage.html"
+.PHONY: dev
+dev: test image kind deploy ## Complete development cycle: test, build image, deploy
 
-clean:
-	@echo "Cleaning..."
-	@rm -rf $(BUILD_DIR)
-	@rm -f coverage.out coverage.html
+# Operations
+.PHONY: status
+status: ## Check deployment status
+	kubectl get pods -n $(NAMESPACE)
 
-# Generate protobuf files
-# Note: The reservoir sampler now uses custom binary serialization instead of protobuf for performance
-protobuf:
-	@echo "Generating protobuf files..."
-	@mkdir -p $(PROTO_DIR)
-	$(PROTOC) --go_out=. --go_opt=paths=source_relative $(PROTO_FILES)
+.PHONY: logs
+logs: ## Stream collector logs
+	kubectl logs -f -n $(NAMESPACE) deployment/otel-reservoir-collector
 
-# Generate mocks and other auto-generated files
-generate:
-	@echo "Running go generate..."
-	$(GO) generate ./...
+.PHONY: metrics
+metrics: ## Port-forward and check metrics
+	@echo "Port-forwarding to localhost:8888..."
+	@kubectl port-forward -n $(NAMESPACE) svc/otel-reservoir-collector 8888:8888 & \
+	PID=$$!; \
+	echo "Waiting for connection..."; \
+	sleep 3; \
+	echo "Metrics for reservoir_sampler:"; \
+	curl -s http://localhost:8888/metrics | grep reservoir_sampler; \
+	kill $$PID
 
-# Install dependencies
-deps:
-	@echo "Installing dependencies..."
-	$(GO) mod tidy
-	$(GO) mod download
+.PHONY: clean
+clean: ## Clean up resources
+	helm uninstall otel-reservoir -n $(NAMESPACE) || true
+	kubectl delete namespace $(NAMESPACE) || true
+	rm -rf bin dist
 
-# Run the collector
-run:
-	@echo "Running $(BINARY_NAME)..."
-	$(BUILD_DIR)/$(BINARY_NAME) --config=config.yaml
+# Benchmarking
+.PHONY: bench
+bench: ## Run benchmarks (must specify IMAGE)
+	make -C bench run IMAGE=$(IMAGE) \
+		$(if $(PROFILES),PROFILES=$(PROFILES),) \
+		$(if $(DURATION),DURATION=$(DURATION),) \
+		$(if $(LICENSE_KEY),NRLICENSE=$(LICENSE_KEY),)
 
-# Test targets
-unit-tests:
-	@echo "Running unit tests..."
-	$(GOTEST) -cover -timeout=3m ./internal/...
+.PHONY: bench-clean
+bench-clean: ## Clean up benchmark resources
+	make -C bench clean
 
-integration-tests:
-	@echo "Running integration tests..."
-	$(GOTEST) -cover -timeout=10m ./integration/...
-
-integration-tests-short:
-	@echo "Running integration tests in short mode..."
-	$(GOTEST) -cover -timeout=3m -short ./integration/...
-
-e2e-tests: build
-	@echo "Running e2e tests..."
-	$(GOTEST) -timeout=10m ./e2e/tests/...
-
-# Run full CI locally
-ci: deps build unit-tests integration-tests lint bench
+# Default target
+.DEFAULT_GOAL := help
